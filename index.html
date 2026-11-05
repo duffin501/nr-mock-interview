@@ -77,7 +77,7 @@
 <section id="s-intro" class="on">
   <div class="card">
     <h1>Timed technical interview</h1>
-    <p>You get one problem from the NSTC Interview Practice Problems packet and 10 minutes to work it out loud on camera. Your run is graded and the report goes to you, LT Cole and LT Catozzi.</p>
+    <p>You get one problem from the unit's NR practice bank (about 1,000 problems built from the NSTC practice packet and the qual card) and 10 minutes to work it out loud on camera. Your run is graded and the report goes to you, LT Cole and LT Catozzi.</p>
     <div class="grid2">
       <div><label for="f-name">Full name</label><input id="f-name" autocomplete="name" placeholder="MIDN Jane Smith"></div>
       <div><label for="f-school">School</label>
@@ -89,6 +89,13 @@
         </select></div>
       <div><label for="f-email">School email (your report goes here)</label><input id="f-email" type="email" autocomplete="email"></div>
       <div><label for="f-code">Access code (from your NPO)</label><input id="f-code" autocomplete="off"></div>
+      <div><label for="f-subject">Subject</label>
+        <select id="f-subject">
+          <option value="any">Any subject (like the real interview)</option>
+          <option value="calculus">Calculus</option><option value="physics">Physics</option><option value="electrical">Electrical</option>
+          <option value="htff">Fluids and thermo</option><option value="chemistry">Chemistry</option>
+        </select>
+        <p class="muted" style="margin-top:4px">Pick a subject only to drill a weak area. The real interview does not let you choose.</p></div>
     </div>
   </div>
   <div class="card">
@@ -323,7 +330,7 @@ $("#b-start").onclick = async () => {
   // Countdown on screen while the problem is fetched. The answer clock starts when it shows.
   $("#thumb").srcObject = S.stream;
   const cd = $("#countdown"); cd.classList.add("on");
-  const startReq = api("start", { name: profile.name, school: profile.school, email: profile.email, mime: S.mime, ua: navigator.userAgent }, { retries: 2, timeoutMs: 30000 }).catch(e => ({ ok:false, error:"Could not reach the interview server." }));
+  const startReq = api("start", { name: profile.name, school: profile.school, email: profile.email, subject: $("#f-subject").value, mime: S.mime, ua: navigator.userAgent }, { retries: 2, timeoutMs: 30000 }).catch(e => ({ ok:false, error:"Could not reach the interview server." }));
   for (let n = CONFIG.COUNTDOWN_SEC; n > 0; n--) { $("#cd-num").textContent = n; await sleep(1000); }
   $("#cd-label").textContent = "Getting your problem"; $("#cd-num").textContent = "...";
   const r = await startReq;
