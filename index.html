@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>NR Mock Interview</title>
+<link rel="icon" href="data:,">
 <style>
   :root { --ink:#14202e; --muted:#5b6673; --line:#d5dae0; --bg:#f6f7f9; --card:#fff; --navy:#13294b; --gold:#b8913a;
           --green:#1e7b34; --amber:#9a6b00; --red:#b3261e; }
@@ -121,6 +122,7 @@
     <div class="meter"><i id="meter"></i></div>
     <label>Transcript test (say a sentence; your words should show up here)</label>
     <div id="heard">Listening...</div>
+    <p class="muted" id="heard-hint" style="margin-top:6px">Start unlocks once your words show up here. If nothing shows up after a few sentences, switch to Google Chrome.</p>
   </div>
   <div class="card">
     <h2>Before you start</h2>
@@ -283,14 +285,23 @@ let testRec = null;
 function startTranscriptTest(){
   if (!SR || testRec) return;
   testRec = new SR(); testRec.continuous = true; testRec.interimResults = true; testRec.lang = "en-US";
-  testRec.onresult = ev => { let t = ""; for (let i = ev.resultIndex; i < ev.results.length; i++) t += ev.results[i][0].transcript; $("#heard").textContent = t || "Listening..."; $("#heard").style.color = "var(--ink)"; };
-  testRec.onerror = ev => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") $("#heard").textContent = "The browser blocked speech recognition. Allow the microphone for this site and reload."; };
-  testRec.onend = () => { if (testRec && $("#s-check").classList.contains("on")) { try { testRec.start(); } catch (e) {} } };
+  testRec.onresult = ev => {
+    let t = ""; for (let i = ev.resultIndex; i < ev.results.length; i++) t += ev.results[i][0].transcript;
+    $("#heard").textContent = t || "Listening..."; $("#heard").style.color = "var(--ink)";
+    if (t.trim().split(/\s+/).length >= 2 && !S.heardOk) { S.heardOk = true; $("#heard-hint").textContent = "Transcript works."; $("#heard-hint").style.color = "var(--green)"; updateStart(); }
+  };
+  testRec.onerror = ev => {
+    if (ev.error === "not-allowed" || ev.error === "service-not-allowed") $("#heard").textContent = "The browser blocked speech recognition. Allow the microphone for this site and reload.";
+    if (ev.error === "network") $("#heard").textContent = "This browser could not reach its speech service. Switch to Google Chrome.";
+  };
+  testRec.onend = () => { if (testRec && $("#s-check").classList.contains("on")) setTimeout(() => { if (testRec) { try { testRec.start(); } catch (e) {} } }, 400); };
   try { testRec.start(); } catch (e) {}
 }
 function stopTranscriptTest(){ if (testRec) { const t = testRec; testRec = null; try { t.abort(); } catch (e) {} } }
 document.querySelectorAll(".ready").forEach(c => c.onchange = updateStart);
-function updateStart(){ $("#b-start").disabled = !(S.stream && SR && [...document.querySelectorAll(".ready")].every(c => c.checked)); }
+// Start stays locked until the transcript test has heard the student (staff can bypass with ?nogate=1 for automated tests).
+const NOGATE = /[?&]nogate=1/.test(location.search);
+function updateStart(){ $("#b-start").disabled = !(S.stream && SR && (S.heardOk || NOGATE) && [...document.querySelectorAll(".ready")].every(c => c.checked)); }
 $("#b-back").onclick = () => { stopTranscriptTest(); if (S.stream) S.stream.getTracks().forEach(t => t.stop()); S.stream = null; show("s-intro"); };
 
 /* ---------- 3. recording and the problem ---------- */
@@ -375,12 +386,20 @@ function startListening(){
     }
     S.interim = interim.trim();
   };
-  rec.onerror = ev => { if (ev.error !== "no-speech" && ev.error !== "aborted") logEv("transcript_error", ev.error); if (ev.error === "not-allowed" || ev.error === "service-not-allowed") S.listening = false; };
-  rec.onend = () => { if (S.listening) setTimeout(() => { if (S.listening) { try { rec.start(); } catch (e) {} } }, 200); };
+  S.srErr = {}; S.srFails = 0;
+  rec.onerror = ev => {
+    if (ev.error === "no-speech" || ev.error === "aborted") return;
+    S.srErr[ev.error] = (S.srErr[ev.error] || 0) + 1; S.srFails++;
+    if (S.srErr[ev.error] === 1) logEv("transcript_error", ev.error);   // log once; the count goes in at the end
+    if (ev.error === "not-allowed" || ev.error === "service-not-allowed") S.listening = false;
+  };
+  rec.onresult = (orig => ev => { S.srFails = 0; orig(ev); })(rec.onresult);
+  rec.onend = () => { if (S.listening) setTimeout(() => { if (S.listening) { try { rec.start(); } catch (e) {} } }, Math.min(5000, 200 + 500 * S.srFails)); };
   try { rec.start(); } catch (e) {}
 }
 function stopListening(){
   S.listening = false;
+  Object.keys(S.srErr || {}).forEach(k => { if (S.srErr[k] > 1) logEv("transcript_error", k + " x" + S.srErr[k] + " total"); });
   if (S.interim) { S.transcript.push({ t: Math.max(0, Math.round(answerClock())), text: S.interim }); S.interim = ""; }
   if (S.rec) { try { S.rec.stop(); } catch (e) {} }
 }
