@@ -49,6 +49,15 @@
   #clock { font:700 44px/1 ui-monospace,Consolas,monospace; letter-spacing:.02em; }
   #clock.amber { color:var(--amber); } #clock.red { color:var(--red); }
   #qcard { font-size:20px; line-height:1.55; }
+  #qtext { white-space:pre-wrap; }
+  .grp { font-size:13px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin:18px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--line); }
+  .grp:first-child { margin-top:4px; }
+  .opt { display:flex; gap:10px; align-items:flex-start; font-weight:400; font-size:16px; margin:0; padding:9px 10px; border-radius:4px; cursor:pointer; }
+  .opt:hover { background:#f1f3f5; }
+  .opt input { width:auto; margin-top:5px; flex:none; }
+  .opt b { display:block; }
+  .opt small { display:block; color:var(--muted); font-size:14px; }
+  .opt select { margin-top:6px; max-width:420px; }
   #qcard .qid { font-size:13px; color:var(--muted); font-weight:600; letter-spacing:.05em; text-transform:uppercase; margin-bottom:8px; }
   #qfig { max-width:100%; margin-top:14px; border:1px solid var(--line); background:#fff; }
   #thumb { position:fixed; right:16px; bottom:16px; width:220px; border:3px solid var(--red); z-index:5; }
@@ -77,7 +86,7 @@
 <section id="s-intro" class="on">
   <div class="card">
     <h1>Timed technical interview</h1>
-    <p>You get one problem from the unit's NR practice bank (about 1,000 problems built from the NSTC practice packet and the qual card) and 10 minutes to work it out loud on camera. Your run is graded and the report goes to you, LT Cole and LT Catozzi.</p>
+    <p>You get one problem from the unit's NR practice bank (about 1,000 problems built from the NSTC practice packet and the qual card) and 10 minutes to work it out loud on camera. On the next screen you choose a random problem, a question type, or a question from your own list if an LT has given you one. Your run is graded and the report goes to you, LT Cole and LT Catozzi.</p>
     <div class="grid2">
       <div><label for="f-name">Full name</label><input id="f-name" autocomplete="name" placeholder="MIDN Jane Smith"></div>
       <div><label for="f-school">School</label>
@@ -87,15 +96,9 @@
           <option>William &amp; Mary</option><option>Christopher Newport University</option><option>Virginia Wesleyan University</option>
           <option>Regent University</option><option>Other</option>
         </select></div>
-      <div><label for="f-email">School email (your report goes here)</label><input id="f-email" type="email" autocomplete="email"></div>
+      <div><label for="f-email">School email (your report goes here)</label><input id="f-email" type="email" autocomplete="email">
+        <p class="muted" style="margin-top:4px">Use the same school email every time. Questions an LT gives you are tied to it.</p></div>
       <div><label for="f-code">Access code (from your NPO)</label><input id="f-code" autocomplete="off"></div>
-      <div><label for="f-subject">Subject</label>
-        <select id="f-subject">
-          <option value="any">Any subject (like the real interview)</option>
-          <option value="calculus">Calculus</option><option value="physics">Physics</option><option value="electrical">Electrical</option>
-          <option value="htff">Fluids and thermo</option><option value="chemistry">Chemistry</option>
-        </select>
-        <p class="muted" style="margin-top:4px">Pick a subject only to drill a weak area. The real interview does not let you choose.</p></div>
     </div>
   </div>
   <div class="card">
@@ -111,7 +114,18 @@
     </ul>
   </div>
   <p id="intro-err" class="err"></p>
-  <div class="row"><button id="b-intro">Continue to camera check</button></div>
+  <div class="row"><button id="b-intro">Continue</button></div>
+</section>
+
+<!-- 1b. Choose the question -->
+<section id="s-pick">
+  <div class="card">
+    <h1>Choose your question</h1>
+    <p class="muted">You will not see the problem until the recording has started.</p>
+    <div id="pick-list"></div>
+  </div>
+  <p id="pick-err" class="err"></p>
+  <div class="row"><button id="b-pick">Continue to camera check</button><button id="b-pick-back" class="secondary">Back</button></div>
 </section>
 
 <!-- 2. Camera check -->
@@ -239,12 +253,59 @@ $("#b-intro").onclick = async () => {
   profile = p; localStorage.setItem("nrmock_profile", JSON.stringify(p));
   $("#b-intro").disabled = true; $("#b-intro").textContent = "Checking...";
   try {
-    const r = await api("hello", {});
+    const r = await api("hello", { email: p.email });
     if (!r.ok) { err.textContent = r.error; return; }
-    show("s-check"); await startCamera();
+    renderPick(r.menu || { forYou: [], types: [] });
+    show("s-pick");
   } catch (e) { err.textContent = "Could not reach the interview server. Check your internet connection and try again."; }
-  finally { $("#b-intro").disabled = false; $("#b-intro").textContent = "Continue to camera check"; }
+  finally { $("#b-intro").disabled = false; $("#b-intro").textContent = "Continue"; }
 };
+
+/* ---------- 1b. choose the question ---------- */
+const SUBJECTS = { calculus:"Calculus", physics:"Physics", electrical:"Electrical", htff:"Fluids and thermo", chemistry:"Chemistry" };
+function renderPick(menu){
+  let h = "";
+  const opt = (value, title, sub, extra) => `<label class="opt"><input type="radio" name="pick" value="${esc(value)}"><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}${extra || ""}</span></label>`;
+  // The student's own list, grouped by what kind of question it is.
+  const kinds = [];
+  menu.forYou.forEach(it => { if (!kinds.includes(it.kind)) kinds.push(it.kind); });
+  kinds.forEach(kind => {
+    h += `<div class="grp">Your list: ${esc(kind)}</div>`;
+    menu.forYou.filter(it => it.kind === kind).forEach(it => {
+      const tried = it.attempts ? ` Tried ${it.attempts} time${it.attempts > 1 ? "s" : ""}, last result ${it.last}.` : "";
+      h += opt(it.key, it.label, [it.by ? "From " + it.by + "." : "", it.note || "", tried].join(" ").trim());
+    });
+  });
+  h += `<div class="grp">Open practice</div>`;
+  h += opt("any", "Random problem, any subject", "This is what the real interview is like. You do not get to choose.");
+  if (menu.types.length) {
+    const groups = Object.keys(SUBJECTS).map(s => {
+      const ts = menu.types.filter(t => t.subject === s);
+      return ts.length ? `<optgroup label="${esc(SUBJECTS[s])}">` + ts.map(t => `<option value="${esc(t.key)}">${esc(t.label)} (${t.n})</option>`).join("") + "</optgroup>" : "";
+    }).join("");
+    h += opt("type", "Pick a question type", "One qual card line. Use it to drill a weak area.", `<select id="pick-type">${groups}</select>`);
+  }
+  h += opt("subject", "Pick a subject", "A random problem from one subject.", `<select id="pick-subject">${Object.keys(SUBJECTS).map(s => `<option value="${s}">${SUBJECTS[s]}</option>`).join("")}</select>`);
+  $("#pick-list").innerHTML = h;
+  // Default: the first item on the student's own list if there is one, otherwise random.
+  const first = document.querySelector('input[name="pick"]'); if (first) first.checked = true;
+  ["pick-type", "pick-subject"].forEach(id => { const el = document.getElementById(id); if (el) el.onchange = el.onfocus = () => { el.closest(".opt").querySelector("input").checked = true; }; });
+}
+function currentPick(){
+  const c = document.querySelector('input[name="pick"]:checked');
+  if (!c) return null;
+  if (c.value === "any") return { subject: "any" };
+  if (c.value === "type") return { topic: $("#pick-type").value };
+  if (c.value === "subject") return { subject: $("#pick-subject").value };
+  return { key: c.value };
+}
+$("#b-pick").onclick = async () => {
+  S.pick = currentPick();
+  if (!S.pick) { $("#pick-err").textContent = "Choose one."; return; }
+  $("#pick-err").textContent = "";
+  show("s-check"); await startCamera();
+};
+$("#b-pick-back").onclick = () => show("s-intro");
 
 /* ---------- 2. camera check ---------- */
 async function startCamera(camId, micId){
@@ -309,7 +370,7 @@ document.querySelectorAll(".ready").forEach(c => c.onchange = updateStart);
 // Start stays locked until the transcript test has heard the student (staff can bypass with ?nogate=1 for automated tests).
 const NOGATE = /[?&]nogate=1/.test(location.search);
 function updateStart(){ $("#b-start").disabled = !(S.stream && SR && (S.heardOk || NOGATE) && [...document.querySelectorAll(".ready")].every(c => c.checked)); }
-$("#b-back").onclick = () => { stopTranscriptTest(); if (S.stream) S.stream.getTracks().forEach(t => t.stop()); S.stream = null; show("s-intro"); };
+$("#b-back").onclick = () => { stopTranscriptTest(); if (S.stream) S.stream.getTracks().forEach(t => t.stop()); S.stream = null; show("s-pick"); };
 
 /* ---------- 3. recording and the problem ---------- */
 $("#b-start").onclick = async () => {
@@ -330,7 +391,7 @@ $("#b-start").onclick = async () => {
   // Countdown on screen while the problem is fetched. The answer clock starts when it shows.
   $("#thumb").srcObject = S.stream;
   const cd = $("#countdown"); cd.classList.add("on");
-  const startReq = api("start", { name: profile.name, school: profile.school, email: profile.email, subject: $("#f-subject").value, mime: S.mime, ua: navigator.userAgent }, { retries: 2, timeoutMs: 30000 }).catch(e => ({ ok:false, error:"Could not reach the interview server." }));
+  const startReq = api("start", { name: profile.name, school: profile.school, email: profile.email, pick: S.pick || {}, subject: (S.pick && S.pick.subject) || "any", mime: S.mime, ua: navigator.userAgent }, { retries: 2, timeoutMs: 30000 }).catch(e => ({ ok:false, error:"Could not reach the interview server." }));
   for (let n = CONFIG.COUNTDOWN_SEC; n > 0; n--) { $("#cd-num").textContent = n; await sleep(1000); }
   $("#cd-label").textContent = "Getting your problem"; $("#cd-num").textContent = "...";
   const r = await startReq;
